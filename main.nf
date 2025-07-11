@@ -54,7 +54,7 @@ process align_mafft {
     publishDir params.out, mode: 'copy'
 
     input:
-    path "${params.combined_fasta}" //via combine_fasta_channel
+    path "${params.combined_fasta}" // via combine_fasta.out
 
     output:
     path "${params.alignment_mafft}"
@@ -72,7 +72,7 @@ process trimming_trimal {
     publishDir params.out, mode: 'copy'
 
     input:
-    path "${params.alignment_mafft}" //via alignment_channel
+    path "${params.alignment_mafft}" // via align_mafft.out
 
     output:
     path "${params.trimming_trimal_report}"
@@ -80,7 +80,7 @@ process trimming_trimal {
 
     script:
     """
-    trimal -in "${params.alignment_mafft}" -out "${params.trimming_trimal_fasta}" -automated1 -htmlout "${params.trimming_trimal_report}"
+    trimal -in "${params.alignment_mafft}" -out "${params.trimming_trimal_fasta}" -automated1 -htmlout "${params.trimming_trimal_report}" -fasta
     """
 
 }
@@ -89,17 +89,15 @@ workflow {
     download_ref(params.accession_ref)
 
     reads_raw_channel = Channel.fromPath("${params.reads_raw}/${params.reads_glob}").collect()
-    reads_raw_channel.view()
 
     combine_fasta(reads_raw_channel)
     
-    combine_fasta_channel = Channel.fromPath("${params.out}/${params.combined_fasta}")
-    combine_fasta_channel.view()
+    //combine_fasta_channel = Channel.fromPath("${params.out}/${params.combined_fasta}")
     
-    align_mafft(combine_fasta_channel)
+    align_mafft(combine_fasta.out)
 
-    alignment_channel = Channel.fromPath("${params.out}/${params.alignment_mafft}")
-    alignment_channel.view()
-
-    trimming_trimal(alignment_channel)
+    //alignment_channel = Channel.fromPath("${params.out}/${params.alignment_mafft}")
+    
+    trimming_trimal(align_mafft.out)
+    
 }
