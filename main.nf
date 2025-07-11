@@ -1,72 +1,105 @@
 #!/usr/bin/env nextflow
 
-params.reads_dir = "/mnt/c/Users/User/Documents/Nextflow/nf-scripts/data/samples/"
-params.reads_glob = "*_R{1,2}*.{fq,fastq}" // define how to pick only paired-end reads files with global pattern; optionally add: {.gz,}.
-params.out = "results/"
-params.accession = "NC_000913.3"
-
-workflow {
-    download_ref(params.accession)
-
-    raw_reads_ch = Channel.fromFilePairs("${params.reads_dir}/${params.reads_glob}", flat: true, checkIfExists: true)
-    // raw_reads_ch.view() // check channel output object/structure
-    fastqc(raw_reads_ch) // [S1, /mnt/c/Users/User/Documents/Nextflow/nf-scripts/data/samples/S1_R1.fq, /mnt/c/Users/User/Documents/Nextflow/nf-scripts/data/samples/S1_R2.fq]
-    /*
-    fastp(raw_reads_ch)
-    bwa_align(fastp.out)
-    call_variants(bwa_align.out)
-    multiqc(params.out)
-    */
-}
-
-// sample_ID = 'S1'
-// reads = [ '/path/to/S1_R1.fq', '/path/to/S1_R2.fq' ]
+params.reads_raw = "hepatitis"
+params.reads_glob = "*.fasta"
+params.out = "results"
+params.accession_ref = "M21012"
+params.combined_fasta = "combined_fasta.fasta"
+params.alignment_mafft = "alignment_mafft.fasta"
+params.trimming_trimal_report = "trimming_trimal.html"
+params.trimming_trimal_fasta = "trimming_trimal.fasta"
 
 process download_ref {
 
-    label 'download_ref'
+    conda 'bioconda::entrez-direct=24.0'
     publishDir params.out, mode: 'copy'
 
     input:
-        val accession
+        val accession_ref
     
     output:
-        path "${accession}.fa"
+        path "${accession_ref}.fa"
     
     script:
         """
-        if [ ! -f "${accession}.fa" ]; then
-            esearch -db nucleotide -query "$accession" | \
-            efetch -format fasta > "${accession}.fa"
+        if [ ! -f "${accession_ref}.fa" ]; then
+            esearch -db nucleotide -query "$accession_ref" | \
+            efetch -format fasta > "${accession_ref}.fa"
         else
-            echo "${accession}.fa already exists, skipping download"
+            echo "${accession_ref}.fa already exists, skipping download"
         fi
         """
 }
 
-process fastqc {
+process combine_fasta {
 
-    label 'fastqc'
-    publishDir params.out, mode: 'copy' 
+    label 'combine_fasta'
+    publishDir params.out, mode: 'copy'
 
     input:
-    tuple val(sample_ID), path(reads)
+    path reads_raw_channel //"${params.reads_raw}/${reads_glob}".collect()
 
     output:
-    path "*.zip", emit: zip // output channel zip - only use emit when output is channeled further.
-    path "*.html", emit: html // output channel html
+    path "${params.combined_fasta}"
 
     script:
     """
-    fastqc ${reads.join(' ')} --outdir .
-    mv ${reads[0].getBaseName().split('_')[0]}_R1_fastqc.zip ${sample_ID}.zip
-    mv ${reads[0].getBaseName().split('_')[0]}_R1_fastqc.html ${sample_ID}.html
+    cat ${reads_raw_channel.join(' ')} > ${params.combined_fasta}
     """
 }
 
+process align_mafft {
 
-// for testing use nextflow run main.nf -resume - this will cache the output and does not hash it to the work dir.
-// nextflow log - displays all the runs with names
-// nextflow clean -before <run name> -n - deletes every run in the work dir before the named one.
-    // -n tells you which hash dir will be removed, so you need to confirm it by
-    // nextflow clean -before <run name> -f finally.
+    conda 'bioconda::mafft=7.525'
+    publishDir params.out, mode: 'copy'
+
+    input:
+    path "${params.combined_fasta}" //via combine_fasta_channel
+
+    output:
+    path "${params.alignment_mafft}"
+
+    script:
+    """
+    mafft --auto --thread -1 "${params.combined_fasta}" > "${params.alignment_mafft}"
+    """
+
+}
+
+process trimming_trimal {
+
+    conda 'bioconda::trimal=1.5.0'
+    publishDir params.out, mode: 'copy'
+
+    input:
+    path "${params.alignment_mafft}" //via alignment_channel
+
+    output:
+    path "${params.trimming_trimal_report}"
+    path "${params.trimming_trimal_fasta}"
+
+    script:
+    """
+    trimal -in "${params.alignment_mafft}" -out "${params.trimming_trimal_fasta}" -automated1 -htmlout "${params.trimming_trimal_report}"
+    """
+
+}
+
+workflow {
+    download_ref(params.accession_ref)
+
+    reads_raw_channel = Channel.fromPath("${params.reads_raw}/${params.reads_glob}").collect()
+    reads_raw_channel.view()
+
+    combine_fasta(reads_raw_channel)
+    
+    combine_fasta_channel = Channel.fromPath("${params.out}/${params.combined_fasta}")
+    combine_fasta_channel.view()
+    
+    align_mafft(combine_fasta_channel)
+
+    alignment_channel = Channel.fromPath("${params.out}/${params.alignment_mafft}")
+    alignment_channel.view()
+
+    trimming_trimal(alignment_channel)
+}
