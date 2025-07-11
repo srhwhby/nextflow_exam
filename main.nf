@@ -1,7 +1,7 @@
 #!/usr/bin/env nextflow
 
 params.reads_raw = "hepatitis"
-params.reads_glob = "*.fasta"
+// params.reads_glob = "*.{fa,fasta}"
 params.out = "results"
 params.accession_ref = "M21012"
 params.combined_fasta = "combined_fasta.fasta"
@@ -12,7 +12,7 @@ params.trimming_trimal_fasta = "trimming_trimal.fasta"
 process download_ref {
 
     conda 'bioconda::entrez-direct=24.0'
-    publishDir params.out, mode: 'copy'
+    publishDir params.reads_raw, mode: 'copy'
 
     input:
         val accession_ref
@@ -33,11 +33,10 @@ process download_ref {
 
 process combine_fasta {
 
-    label 'combine_fasta'
     publishDir params.out, mode: 'copy'
 
     input:
-    path reads_raw_channel //"${params.reads_raw}/${reads_glob}".collect()
+    val reads_raw_channel //path reads_raw_channel //"${params.reads_raw}/${reads_glob}".collect()
 
     output:
     path "${params.combined_fasta}"
@@ -86,10 +85,12 @@ process trimming_trimal {
 }
 
 workflow {
-    download_ref(params.accession_ref)
+    download_ref_ch = download_ref(params.accession_ref)
 
-    reads_raw_channel = Channel.fromPath("${params.reads_raw}/${params.reads_glob}").collect()
-
+    reads_raw_channel = Channel.fromPath("${params.reads_raw}/*.fasta", type:'file')
+                                .mix(download_ref_ch)
+                                .collect()
+    reads_raw_channel.view()
     combine_fasta(reads_raw_channel)
     
     //combine_fasta_channel = Channel.fromPath("${params.out}/${params.combined_fasta}")
